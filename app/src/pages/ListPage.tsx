@@ -1,53 +1,65 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth';
-import { listDeposits, statusOf, STATUS_LABEL, daysSince, fmtDate, returnedIdx, type Deposit } from '../db';
+import { listDeposits, statusOf, STATUS_LABEL, daysSince, fmtDate, returnedIdx, isMine, type Deposit } from '../db';
 
 type Filter = 'open' | 'long' | 'overdue' | 'returned' | 'all';
 
+// 担当者セレクトの「自分」を表す値（職員名と重ならないようにする）
+const ME = '__me__';
+
 export default function ListPage() {
-  const { settings } = useAuth();
+  const { settings, staff: me, scope } = useAuth();
   const nav = useNavigate();
+  const myName = me?.name ?? '';
+  // 個人モード（一般職員は常にこちら）は自分の担当分を初期表示。氏名が未設定なら絞り込めないので「すべて」
+  const initialStaff = scope === 'mine' && myName ? ME : '';
   const [rows, setRows] = useState<Deposit[] | null>(null);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<Filter>('open');
   const [q, setQ] = useState('');
-  const [staff, setStaff] = useState('');
+  const [staff, setStaff] = useState(initialStaff);
 
   useEffect(() => {
     listDeposits().then(setRows).catch((e) => setError(e.message));
   }, []);
+  useEffect(() => setStaff(initialStaff), [initialStaff]);
 
   const today = new Date().toISOString().slice(0, 10);
   const isOpen = (d: Deposit) => statusOf(d) !== 'returned';
   const isLong = (d: Deposit) => isOpen(d) && daysSince(d.received_at) >= settings.long_term_days;
   const isOverdue = (d: Deposit) => isOpen(d) && !!d.expected_return && d.expected_return < today;
+  const matchesStaff = (d: Deposit) => (staff === ME ? isMine(d, myName) : !staff || d.staff_name === staff);
 
-  const counts = useMemo(() => {
-    const r = rows ?? [];
-    return {
-      open: r.filter(isOpen).length,
-      long: r.filter(isLong).length,
-      overdue: r.filter(isOverdue).length,
-      returned: r.filter((d) => !isOpen(d)).length,
-    };
-  }, [rows, settings.long_term_days]);
+  const kw = q.trim().toLowerCase();
+  // 検索中は担当者の絞り込みを外し、全員分から探す（他の人が預かった資料を返却するときのため）
+  const base = useMemo(() => (rows ?? []).filter((d) => kw || matchesStaff(d)), [rows, staff, kw, myName]);
 
-  const staffNames = useMemo(() => [...new Set((rows ?? []).map((d) => d.staff_name))].sort(), [rows]);
+  const counts = useMemo(
+    () => ({
+      open: base.filter(isOpen).length,
+      long: base.filter(isLong).length,
+      overdue: base.filter(isOverdue).length,
+      returned: base.filter((d) => !isOpen(d)).length,
+    }),
+    [base, settings.long_term_days],
+  );
 
-  const shown = useMemo(() => {
-    const kw = q.trim().toLowerCase();
-    return (rows ?? []).filter((d) => {
-      if (filter === 'open' && !isOpen(d)) return false;
-      if (filter === 'long' && !isLong(d)) return false;
-      if (filter === 'overdue' && !isOverdue(d)) return false;
-      if (filter === 'returned' && isOpen(d)) return false;
-      if (staff && d.staff_name !== staff) return false;
-      if (!kw) return true;
-      const hay = [d.no, d.client_name, d.handed_by, d.purpose, d.location, d.memo, ...d.items.map((i) => i.name)].join(' ').toLowerCase();
-      return hay.includes(kw);
-    });
-  }, [rows, filter, q, staff, settings.long_term_days]);
+  const staffNames = useMemo(() => [...new Set((rows ?? []).map((d) => d.staff_name))].filter((s) => s !== myName).sort(), [rows, myName]);
+
+  const shown = useMemo(
+    () =>
+      base.filter((d) => {
+        if (filter === 'open' && !isOpen(d)) return false;
+        if (filter === 'long' && !isLong(d)) return false;
+        if (filter === 'overdue' && !isOverdue(d)) return false;
+        if (filter === 'returned' && isOpen(d)) return false;
+        if (!kw) return true;
+        const hay = [d.no, d.client_name, d.handed_by, d.purpose, d.location, d.memo, ...d.items.map((i) => i.name)].join(' ').toLowerCase();
+        return hay.includes(kw);
+      }),
+    [base, filter, kw, settings.long_term_days],
+  );
 
   const exportCsv = () => {
     const head = ['預かり番号', '状態', '顧客名', '持参者', '資料', '用途', '預かり日', '経過日数', '担当者', '保管場所', '返却予定日', '最終返却日', '返却受領者', 'メモ'];
@@ -111,7 +123,8 @@ export default function ListPage() {
 
       <div className="toolbar">
         <input placeholder="顧客名・資料名・番号で検索" value={q} onChange={(e) => setQ(e.target.value)} />
-        <select value={staff} onChange={(e) => setStaff(e.target.value)} style={{ maxWidth: 180 }}>
+        <select value={staff} onChange={(e) => setStaff(e.target.value)} style={{ maxWidth: 200 }}>
+          {myName && <option value={ME}>担当者：自分（{myName}）</option>}
           <option value="">担当者：すべて</option>
           {staffNames.map((s) => (
             <option key={s}>{s}</option>
@@ -128,6 +141,13 @@ export default function ListPage() {
           CSV出力
         </button>
       </div>
+
+      {kw && staff && <p className="small-text muted" style={{ marginTop: -6 }}>検索中は担当者に関係なく全員分から探しています。</p>}
+      {!myName && (
+        <p className="small-text muted" style={{ marginTop: -6 }}>
+          <Link to="/settings">設定</Link>で氏名を登録すると、自分の担当分だけを表示できます。
+        </p>
+      )}
 
       {error && <div className="error">{error}</div>}
       {!rows && !error && <p className="muted">読み込み中…</p>}
@@ -186,6 +206,12 @@ export default function ListPage() {
             ))}
           </div>
         </>
+      )}
+
+      {rows && staff === ME && !kw && (
+        <p className="small-text muted" style={{ marginTop: 16 }}>
+          自分の担当分（自分が預かった資料と、自分が返却した資料）のみ表示しています。他の人が預かった資料を返却するときは、上の検索欄で顧客名を探すか、資料に貼ったラベルのQRコードを読み取ってください。
+        </p>
       )}
     </>
   );

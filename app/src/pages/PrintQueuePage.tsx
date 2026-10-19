@@ -3,20 +3,16 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../auth';
 import PrintedPrompt from '../PrintedPrompt';
 import { LabelPaper, ReturnPaper } from '../papers';
-import { getDeposit, listDeposits, markPrinted, statusOf, fmtDateTime, type Deposit, type ReturnEvent } from '../db';
-
-interface QueueItem {
-  key: string;
-  kind: 'label' | 'return';
-  deposit: Deposit;
-  ret?: ReturnEvent;
-  at: string;
-}
+import { getDeposit, listDeposits, markPrinted, queueItems, fmtDateTime, type Deposit, type QueueItem } from '../db';
 
 // iPhone で登録した貼付ラベル・返却確認書のうち、まだ印刷していないものを PC でまとめて印刷する
 export default function PrintQueuePage({ onChanged }: { onChanged: () => void }) {
-  const { settings, staff } = useAuth();
-  const [items, setItems] = useState<QueueItem[] | null>(null);
+  const { settings, staff, scope } = useAuth();
+  const myName = staff?.name ?? '';
+  // 個人モード（一般職員は常にこちら）は自分の分を初期表示。氏名が未設定なら全員の分
+  const initialMine = scope === 'mine' && !!myName;
+  const [rows, setRows] = useState<Deposit[] | null>(null);
+  const [onlyMine, setOnlyMine] = useState(initialMine);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [printing, setPrinting] = useState<Deposit[] | null>(null);
   const [printKeys, setPrintKeys] = useState<QueueItem[]>([]);
@@ -25,15 +21,7 @@ export default function PrintQueuePage({ onChanged }: { onChanged: () => void })
 
   const load = async () => {
     try {
-      const rows = await listDeposits();
-      const q: QueueItem[] = [];
-      for (const d of rows) {
-        if (!d.label_printed_at && statusOf(d) !== 'returned') q.push({ key: `l:${d.id}`, kind: 'label', deposit: d, at: d.received_at });
-        for (const r of d.deposit_returns) if (!r.printed_at) q.push({ key: `r:${r.id}`, kind: 'return', deposit: d, ret: r, at: r.returned_at });
-      }
-      q.sort((a, b) => a.at.localeCompare(b.at));
-      setItems(q);
-      setSelected(new Set(q.map((x) => x.key)));
+      setRows(await listDeposits());
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -41,6 +29,14 @@ export default function PrintQueuePage({ onChanged }: { onChanged: () => void })
   useEffect(() => {
     load();
   }, []);
+  useEffect(() => setOnlyMine(initialMine), [initialMine]);
+
+  const allItems = useMemo(() => (rows ? queueItems(rows) : null), [rows]);
+  const mineItems = useMemo(() => (rows ? queueItems(rows, myName) : null), [rows, myName]);
+  const items = onlyMine ? mineItems : allItems;
+
+  // 一覧が変わったら（読み込み・切替・印刷済み）いったん全部を選択状態にする
+  useEffect(() => setSelected(new Set((items ?? []).map((x) => x.key))), [items]);
 
   const chosen = useMemo(() => (items ?? []).filter((x) => selected.has(x.key)), [items, selected]);
 
@@ -55,7 +51,7 @@ export default function PrintQueuePage({ onChanged }: { onChanged: () => void })
     await markPrinted(
       list.filter((x) => x.kind === 'label').map((x) => x.deposit.id),
       list.filter((x) => x.kind === 'return').map((x) => x.ret!.id),
-      staff?.name ?? '',
+      myName,
     );
     await load();
     onChanged();
@@ -79,6 +75,7 @@ export default function PrintQueuePage({ onChanged }: { onChanged: () => void })
   };
 
   const fullById = new Map((printing ?? []).map((d) => [d.id, d]));
+  const othersCount = (allItems?.length ?? 0) - (mineItems?.length ?? 0);
 
   return (
     <>
@@ -87,9 +84,28 @@ export default function PrintQueuePage({ onChanged }: { onChanged: () => void })
         <p className="muted small-text" style={{ marginTop: -8 }}>
           iPhoneで登録した資料の貼付ラベルと、返却時の返却確認書（どちらもB5）のうち、まだ印刷していないものです。
         </p>
+        {myName && allItems && (
+          <div className="chips">
+            <button type="button" className={`chip ${onlyMine ? 'on' : ''}`} onClick={() => setOnlyMine(true)}>
+              自分の分（{mineItems?.length ?? 0}）
+            </button>
+            <button type="button" className={`chip ${!onlyMine ? 'on' : ''}`} onClick={() => setOnlyMine(false)}>
+              全員の分（{allItems.length}）
+            </button>
+          </div>
+        )}
         {error && <div className="error">{error}</div>}
         {!items && !error && <p className="muted">読み込み中…</p>}
-        {items && !items.length && <div className="card">印刷待ちはありません。</div>}
+        {items && !items.length && (
+          <div className="card">
+            {onlyMine ? '自分の印刷待ちはありません。' : '印刷待ちはありません。'}
+            {onlyMine && othersCount > 0 && (
+              <div className="small-text muted" style={{ marginTop: 6 }}>
+                ほかの職員の印刷待ちが {othersCount} 件あります。「全員の分」で表示できます。
+              </div>
+            )}
+          </div>
+        )}
 
         {!!items?.length && (
           <>
@@ -136,7 +152,7 @@ export default function PrintQueuePage({ onChanged }: { onChanged: () => void })
                     </td>
                     <td>{x.deposit.no}</td>
                     <td>{fmtDateTime(x.at)}</td>
-                    <td>{x.kind === 'label' ? x.deposit.staff_name : x.ret!.staff_name}</td>
+                    <td>{x.staff_name}</td>
                     <td style={{ textAlign: 'right' }}>
                       <button className="small" onClick={() => mark([x])} title="印刷せずに一覧から外す">
                         印刷不要

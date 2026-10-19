@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth';
 import SignatureBox from '../SignatureBox';
-import { createReturn, getDeposit, returnedIdx, fmtDateTime, type Deposit } from '../db';
+import { createReturn, getDeposit, listStaff, returnedIdx, fmtDateTime, type Deposit } from '../db';
 
 export default function ReturnPage() {
   const { id } = useParams();
@@ -13,11 +13,16 @@ export default function ReturnPage() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [recipient, setRecipient] = useState('');
   const [staffName, setStaffName] = useState(staff?.name ?? '');
+  const [staffOptions, setStaffOptions] = useState<string[]>([]);
   const [memo, setMemo] = useState('');
   const [signature, setSignature] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(new Date());
+
+  useEffect(() => {
+    listStaff().then((s) => setStaffOptions(s.filter((x) => x.active && x.name).map((x) => x.name))).catch(() => {});
+  }, []);
 
   useEffect(() => {
     getDeposit(id!)
@@ -147,7 +152,12 @@ export default function ReturnPage() {
           <span>
             返却担当者<span className="req">*</span>
           </span>
-          <input value={staffName} onChange={(e) => setStaffName(e.target.value)} required />
+          <input list="return-staff" value={staffName} onChange={(e) => setStaffName(e.target.value)} required />
+          <datalist id="return-staff">
+            {staffOptions.map((s) => (
+              <option key={s} value={s} />
+            ))}
+          </datalist>
         </label>
         <label className="field" style={{ marginBottom: 0 }}>
           <span>メモ（郵送・手渡し等）</span>

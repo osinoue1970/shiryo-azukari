@@ -2,10 +2,15 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import type { Session } from '@supabase/supabase-js';
 import { supabase, getSettings, DEFAULT_SETTINGS, type Settings, type Staff } from './db';
 
+// 表示モード: mine = 自分の担当分だけ（個人モード） / all = 全員の分（管理者モード）
+export type Scope = 'mine' | 'all';
+
 interface AuthState {
   session: Session | null;
   staff: Staff | null;
   settings: Settings;
+  scope: Scope;
+  setScope: (s: Scope) => void;
   reloadSettings: () => Promise<void>;
   reloadStaff: () => Promise<void>;
 }
@@ -24,6 +29,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [staffChecked, setStaffChecked] = useState(false);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
+  const [scope, setScopeState] = useState<Scope>('mine');
+
+  // 管理者だけがモードを切り替えられる。選んだモードは端末ごとに覚える
+  const scopeKey = staff ? `scope:${staff.user_id}` : '';
+  useEffect(() => {
+    if (!staff?.is_admin) return setScopeState('mine');
+    try {
+      setScopeState(localStorage.getItem(scopeKey) === 'mine' ? 'mine' : 'all');
+    } catch {
+      setScopeState('all');
+    }
+  }, [scopeKey, staff?.is_admin]);
+  const setScope = (s: Scope) => {
+    if (!staff?.is_admin) return;
+    setScopeState(s);
+    try {
+      localStorage.setItem(scopeKey, s);
+    } catch {
+      /* 保存できなくても動作に影響なし */
+    }
+  };
 
   // auth.getUser() はログイン直後の認証ロック中に呼ぶと止まるため、セッションの user id を使う
   const userId = session?.user.id;
@@ -64,7 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   if (!staff) return <NoStaff />;
   if (!staff.active) return <Pending email={staff.email} />;
 
-  return <Ctx.Provider value={{ session, staff, settings, reloadSettings, reloadStaff }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ session, staff, settings, scope, setScope, reloadSettings, reloadStaff }}>{children}</Ctx.Provider>;
 }
 
 function Login() {

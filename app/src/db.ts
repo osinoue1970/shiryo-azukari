@@ -156,6 +156,38 @@ export const STATUS_LABEL: Record<Status, string> = {
   returned: '返却済',
 };
 
+// 「自分の分」: 預かりの担当者が自分、または自分が返却した記録がある
+export function isMine(d: Deposit, name: string): boolean {
+  if (!name) return true;
+  return d.staff_name === name || d.deposit_returns.some((r) => r.staff_name === name);
+}
+
+export interface QueueItem {
+  key: string;
+  kind: 'label' | 'return';
+  deposit: Deposit;
+  ret?: ReturnEvent;
+  at: string;
+  staff_name: string; // ラベルは預かり担当者、返却確認書は返却担当者
+}
+
+// まだ印刷していない貼付ラベル・返却確認書。onlyStaff を渡すとその担当者の分だけ
+export function queueItems(rows: Deposit[], onlyStaff = ''): QueueItem[] {
+  const q: QueueItem[] = [];
+  for (const d of rows) {
+    if (!d.label_printed_at && statusOf(d) !== 'returned' && (!onlyStaff || d.staff_name === onlyStaff)) {
+      q.push({ key: `l:${d.id}`, kind: 'label', deposit: d, at: d.received_at, staff_name: d.staff_name });
+    }
+    for (const r of d.deposit_returns) {
+      if (!r.printed_at && (!onlyStaff || r.staff_name === onlyStaff)) {
+        q.push({ key: `r:${r.id}`, kind: 'return', deposit: d, ret: r, at: r.returned_at, staff_name: r.staff_name });
+      }
+    }
+  }
+  q.sort((a, b) => a.at.localeCompare(b.at));
+  return q;
+}
+
 export function daysSince(iso: string): number {
   return Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
 }
