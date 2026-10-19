@@ -6,6 +6,8 @@ export default function SettingsPage() {
   const { staff: me, settings, reloadSettings, reloadStaff } = useAuth();
   const [form, setForm] = useState<Settings>(settings);
   const [myName, setMyName] = useState(me?.name ?? '');
+  const [pw, setPw] = useState('');
+  const [pw2, setPw2] = useState('');
   const [staffList, setStaffList] = useState<Staff[]>([]);
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
@@ -49,6 +51,36 @@ export default function SettingsPage() {
           </button>
           <button onClick={() => supabase.auth.signOut()}>ログアウト</button>
         </div>
+      </div>
+
+      <div className="card">
+        <h2>パスワード変更</h2>
+        <p className="small-text muted" style={{ marginTop: -6 }}>
+          忘れてしまったときは、ログイン画面の「パスワードを忘れた方」から再設定メールを送れます。
+        </p>
+        <label className="field">
+          <span>新しいパスワード（8文字以上）</span>
+          <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} minLength={8} autoComplete="new-password" />
+        </label>
+        <label className="field">
+          <span>新しいパスワード（確認）</span>
+          <input type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} minLength={8} autoComplete="new-password" />
+        </label>
+        <button
+          className="primary"
+          disabled={pw.length < 8 || pw !== pw2}
+          onClick={() =>
+            run(async () => {
+              const { error } = await supabase.auth.updateUser({ password: pw });
+              if (error) throw new Error(error.message.includes('different') ? '今までと同じパスワードは使えません。' : error.message);
+              setPw('');
+              setPw2('');
+            }, 'パスワードを変更しました。')
+          }
+        >
+          変更する
+        </button>
+        {pw && pw2 && pw !== pw2 && <p className="small-text" style={{ color: 'var(--danger)', margin: '8px 0 0' }}>確認用のパスワードが一致しません。</p>}
       </div>
 
       <div className="card">

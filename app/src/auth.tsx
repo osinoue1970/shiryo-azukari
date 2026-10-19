@@ -30,6 +30,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [scope, setScopeState] = useState<Scope>('mine');
+  // パスワード再設定メールのリンクから開いたとき（URL に type=recovery が付く）
+  const [recovery, setRecovery] = useState(() => /type=recovery/.test(location.hash));
 
   // 管理者だけがモードを切り替えられる。選んだモードは端末ごとに覚える
   const scopeKey = staff ? `scope:${staff.user_id}` : '';
@@ -66,7 +68,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(data.session);
       setLoading(false);
     });
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+    const { data: sub } = supabase.auth.onAuthStateChange((e, s) => {
+      setSession(s);
+      if (e === 'PASSWORD_RECOVERY') setRecovery(true);
+    });
     return () => sub.subscription.unsubscribe();
   }, []);
 
@@ -86,6 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   if (loading) return <main className="muted">読み込み中…</main>;
   if (!session) return <Login />;
+  if (recovery) return <NewPassword onDone={() => setRecovery(false)} />;
   if (!staff && !staffChecked) return <main className="muted">読み込み中…</main>;
   if (!staff) return <NoStaff />;
   if (!staff.active) return <Pending email={staff.email} />;
@@ -94,7 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 }
 
 function Login() {
-  const [mode, setMode] = useState<'in' | 'up'>('in');
+  const [mode, setMode] = useState<'in' | 'up' | 'reset'>('in');
   const [email, setEmail] = useState(() => {
     try {
       return localStorage.getItem('last-email') ?? '';
@@ -114,7 +120,11 @@ function Login() {
     setInfo('');
     setBusy(true);
     try {
-      if (mode === 'in') {
+      if (mode === 'reset') {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+        if (error) throw error;
+        setInfo(`${email} に再設定用のメールを送りました。届いたメールのリンクを開くと、新しいパスワードを設定できます（届くまで数分かかることがあります。迷惑メールも確認してください）。`);
+      } else if (mode === 'in') {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
         try {
@@ -142,7 +152,8 @@ function Login() {
     <main className="narrow" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 40px)' }}>
       <h1 style={{ textAlign: 'center' }}>資料 預かり・返却管理</h1>
       <form className="card" onSubmit={submit}>
-        <h2>{mode === 'in' ? 'ログイン' : '職員登録'}</h2>
+        <h2>{mode === 'in' ? 'ログイン' : mode === 'up' ? '職員登録' : 'パスワードの再設定'}</h2>
+        {mode === 'reset' && <p className="small-text muted">登録したメールアドレスを入力してください。再設定用のリンクをメールで送ります。</p>}
         {error && <div className="error">{error}</div>}
         {info && <div className="notice">{info}</div>}
         {mode === 'up' && (
@@ -155,20 +166,22 @@ function Login() {
           <span>メールアドレス</span>
           <input type="email" name="username" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="username" />
         </label>
-        <label className="field">
-          <span>パスワード{mode === 'up' && '（8文字以上）'}</span>
-          <input
-            type="password"
-            name="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            minLength={mode === 'up' ? 8 : undefined}
-            autoComplete={mode === 'in' ? 'current-password' : 'new-password'}
-          />
-        </label>
+        {mode !== 'reset' && (
+          <label className="field">
+            <span>パスワード{mode === 'up' && '（8文字以上）'}</span>
+            <input
+              type="password"
+              name="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              minLength={mode === 'up' ? 8 : undefined}
+              autoComplete={mode === 'in' ? 'current-password' : 'new-password'}
+            />
+          </label>
+        )}
         <button className="primary block" disabled={busy}>
-          {mode === 'in' ? 'ログイン' : '登録する'}
+          {mode === 'in' ? 'ログイン' : mode === 'up' ? '登録する' : '再設定メールを送る'}
         </button>
         {mode === 'in' && (
           <p className="small-text muted" style={{ margin: '10px 0 0' }}>
@@ -177,9 +190,13 @@ function Login() {
         )}
         <p className="small-text muted" style={{ textAlign: 'center', marginBottom: 0 }}>
           {mode === 'in' ? (
-            <a href="#" onClick={(e) => (e.preventDefault(), setMode('up'))}>はじめての方は職員登録</a>
+            <>
+              <a href="#" onClick={(e) => (e.preventDefault(), setError(''), setInfo(''), setMode('reset'))}>パスワードを忘れた方</a>
+              　|　
+              <a href="#" onClick={(e) => (e.preventDefault(), setError(''), setInfo(''), setMode('up'))}>はじめての方は職員登録</a>
+            </>
           ) : (
-            <a href="#" onClick={(e) => (e.preventDefault(), setMode('in'))}>ログインに戻る</a>
+            <a href="#" onClick={(e) => (e.preventDefault(), setError(''), setInfo(''), setMode('in'))}>ログインに戻る</a>
           )}
         </p>
       </form>
@@ -188,6 +205,50 @@ function Login() {
           登録後、管理者が「設定」画面で利用を許可すると使えるようになります。登録したことを管理者に伝えてください。
         </p>
       )}
+    </main>
+  );
+}
+
+// 再設定メールのリンクから開いたときの「新しいパスワードを設定」画面
+function NewPassword({ onDone }: { onDone: () => void }) {
+  const [pw, setPw] = useState('');
+  const [pw2, setPw2] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (pw.length < 8) return setError('パスワードは8文字以上にしてください。');
+    if (pw !== pw2) return setError('確認用のパスワードが一致しません。');
+    setBusy(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: pw });
+      if (error) throw error;
+      location.hash = '#/';
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? translate(err.message) : String(err));
+      setBusy(false);
+    }
+  };
+  return (
+    <main className="narrow" style={{ paddingTop: 60 }}>
+      <form className="card" onSubmit={submit}>
+        <h2>新しいパスワードを設定</h2>
+        <p className="small-text muted">次回からはこのパスワードでログインします。</p>
+        {error && <div className="error">{error}</div>}
+        <label className="field">
+          <span>新しいパスワード（8文字以上）</span>
+          <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} required minLength={8} autoComplete="new-password" />
+        </label>
+        <label className="field">
+          <span>新しいパスワード（確認）</span>
+          <input type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} required minLength={8} autoComplete="new-password" />
+        </label>
+        <button className="primary block" disabled={busy}>
+          {busy ? '保存中…' : 'パスワードを設定してはじめる'}
+        </button>
+      </form>
     </main>
   );
 }
@@ -228,5 +289,9 @@ function translate(msg: string): string {
   if (msg.toLowerCase().includes('rate limit')) return '登録が混み合っています。しばらく時間をおいてもう一度お試しください。';
   if (msg.includes('already registered')) return 'このメールアドレスは登録済みです。ログインしてください。';
   if (msg.includes('Password should be')) return 'パスワードは8文字以上にしてください。';
+  if (msg.includes('New password should be different')) return '今までと同じパスワードは使えません。別のものにしてください。';
+  if (msg.includes('For security purposes')) return '少し時間をおいてから、もう一度お試しください。';
+  if (msg.includes('Email not found') || msg.includes('User not found')) return 'このメールアドレスは登録されていません。';
+  if (msg.includes('Auth session missing')) return '再設定のリンクの有効期限が切れています。もう一度「パスワードを忘れた方」からやり直してください。';
   return msg;
 }
