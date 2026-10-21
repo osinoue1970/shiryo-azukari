@@ -189,6 +189,39 @@ ul.items li.done { color: var(--muted); text-decoration: line-through; }
 .check-item { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 15px; }
 .check-item input { width: 22px; height: 22px; flex: none; }
 
+/* 写真 */
+.photo-capture input[type='file'] { display: none; }
+.photo-buttons { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.btn.photo-shoot { flex: 1 1 220px; min-height: 64px; font-size: 17px; font-weight: 800; color: var(--primary); background: var(--primary-weak); border: 2px dashed var(--primary); }
+.btn.photo-album { flex: none; color: var(--muted); }
+.photo-hint { margin: 8px 0 0; }
+.thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; margin-top: 10px; }
+.thumbs.large { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); margin-top: 0; }
+.thumb { padding: 0; width: 100%; aspect-ratio: 1; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fff; display: block; }
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb.placeholder { display: flex; align-items: center; justify-content: center; background: #f3f4f6; color: var(--muted); font-size: 12px; }
+.cap-thumb { position: relative; }
+.cap-status { position: absolute; left: 4px; bottom: 4px; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 999px; background: rgba(0,0,0,.6); color: #fff; pointer-events: none; }
+.cap-thumb.done .cap-status { background: var(--ok); }
+.cap-thumb.error .cap-status { background: var(--danger); }
+.cap-thumb.error .thumb { outline: 2px solid var(--danger); }
+.cap-remove { position: absolute; top: -6px; right: -6px; width: 26px; height: 26px; padding: 0; border-radius: 50%; font-size: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+.cap-retry { position: absolute; right: 4px; bottom: 4px; padding: 2px 8px; }
+.lightbox { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.88); display: flex; align-items: center; justify-content: center; padding: calc(env(safe-area-inset-top) + 52px) 12px calc(env(safe-area-inset-bottom) + 12px); }
+.lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.lightbox-close { position: absolute; top: calc(env(safe-area-inset-top) + 10px); right: 12px; }
+
+.link-btn { background: none; border: 0; padding: 12px 0 0; color: var(--primary); font-size: 14px; }
+.staff-line { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; font-size: 15px; }
+details.more summary { cursor: pointer; color: var(--primary); font-weight: 600; font-size: 14px; padding: 4px 0; }
+details.more[open] summary { margin-bottom: 10px; }
+
+/* 返却方法 */
+.method-pick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.method-pick button { flex-direction: column; gap: 2px; padding: 12px 4px; font-size: 15px; font-weight: 700; border-width: 2px; }
+.method-pick button.on { border-color: var(--primary); background: var(--primary-weak); color: var(--primary); }
+.method-icon { font-size: 26px; line-height: 1.2; }
+
 /* 印刷 */
 .print-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
 .print-area { display: none; }

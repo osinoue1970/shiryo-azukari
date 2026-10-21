@@ -11,14 +11,17 @@ export default function DonePage({ kind }: { kind: 'deposit' | 'return' }) {
   }, [id]);
 
   const r = kind === 'return' ? d?.deposit_returns.find((x) => x.id === rid) : undefined;
+  const shipped = !!r && r.method !== 'hand';
   const names = d ? (r ? r.item_idx.map((i) => d.items[i]?.name) : d.items.map((i) => `${i.name}${i.qty ? `（${i.qty}）` : ''}`)) : [];
 
   return (
     <div className="narrow">
       <div className="card done-box">
         <div className="check">✓</div>
-        <div className="title">{kind === 'deposit' ? '預かりを登録しました' : '返却を登録しました'}</div>
-        <div className="muted">お客様のサインとともに保存されました。</div>
+        <div className="title">{kind === 'deposit' ? '預かりを登録しました' : shipped ? '返却（発送）を登録しました' : '返却を登録しました'}</div>
+        <div className="muted">
+          {shipped ? '発送記録の写真とともに保存されました。' : d?.photos.length && kind === 'deposit' ? 'お客様のサインと写真とともに保存されました。' : 'お客様のサインとともに保存されました。'}
+        </div>
         {d && (
           <div style={{ textAlign: 'left', marginTop: 18, background: 'var(--bg)', borderRadius: 10, padding: '12px 14px' }}>
             <div style={{ fontWeight: 700, fontSize: 17 }}>{d.client_name} 様</div>

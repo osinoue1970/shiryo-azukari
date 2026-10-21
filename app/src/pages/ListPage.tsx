@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth';
-import { listDeposits, statusOf, STATUS_LABEL, daysSince, fmtDate, returnedIdx, isMine, type Deposit } from '../db';
+import { listDeposits, statusOf, STATUS_LABEL, daysSince, fmtDate, returnedIdx, returnMethodText, isMine, type Deposit } from '../db';
 
 type Filter = 'open' | 'long' | 'overdue' | 'returned' | 'all';
 
@@ -62,7 +62,7 @@ export default function ListPage() {
   );
 
   const exportCsv = () => {
-    const head = ['預かり番号', '状態', '顧客名', '持参者', '資料', '用途', '預かり日', '経過日数', '担当者', '保管場所', '返却予定日', '最終返却日', '返却受領者', 'メモ'];
+    const head = ['預かり番号', '状態', '顧客名', '持参者', '資料', '用途', '預かり日', '経過日数', '担当者', '保管場所', '返却予定日', '最終返却日', '返却受領者', '返却方法', 'メモ'];
     const lines = shown.map((d) => {
       const last = d.deposit_returns.at(-1);
       return [
@@ -79,6 +79,7 @@ export default function ListPage() {
         fmtDate(d.expected_return),
         last ? fmtDate(last.returned_at) : '',
         last?.recipient ?? '',
+        last ? returnMethodText(last) : '',
         d.memo,
       ];
     });

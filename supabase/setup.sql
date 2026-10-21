@@ -81,6 +81,7 @@ create table public.deposits (
   expected_return date,
   memo text not null default '',
   signature text not null,
+  photos text[] not null default '{}', -- 預かり時の写真（Storage 上のパス）
   hash text not null default '',
   label_printed_at timestamptz,
   label_printed_by text not null default '',
@@ -105,15 +106,15 @@ end $$;
 create trigger deposits_assign_no before insert on public.deposits
   for each row execute function public.assign_deposit_no();
 
--- サインした内容は変更不可（保管場所・返却予定日・メモ・印刷済みの記録だけ変更可）
+-- サイン・写真とともに記録した内容は変更不可（保管場所・返却予定日・メモ・印刷済みの記録だけ変更可）
 create or replace function public.protect_signed_deposit() returns trigger
 language plpgsql set search_path = public as $$
 begin
   if (new.no, new.client_name, new.handed_by, new.items, new.purpose, new.received_at,
-      new.staff_name, new.signature, new.hash, new.created_by, new.created_at)
+      new.staff_name, new.signature, new.photos, new.hash, new.created_by, new.created_at)
      is distinct from
      (old.no, old.client_name, old.handed_by, old.items, old.purpose, old.received_at,
-      old.staff_name, old.signature, old.hash, old.created_by, old.created_at) then
+      old.staff_name, old.signature, old.photos, old.hash, old.created_by, old.created_at) then
     raise exception '署名済みの預かり内容は変更できません';
   end if;
   new.updated_at := now();
@@ -133,12 +134,18 @@ create table public.deposit_returns (
   recipient text not null default '',
   item_idx int[] not null,
   memo text not null default '',
-  signature text not null,
+  method text not null default 'hand' check (method in ('hand', 'courier', 'post')), -- 手渡し・宅配便・郵便
+  carrier text not null default '', -- ヤマト運輸・簡易書留など
+  tracking_no text not null default '',
+  signature text not null, -- 手渡しのときのお客様の受領サイン（発送のときは空）
+  photos text[] not null default '{}', -- 発送のときの伝票・郵便物の写真
   hash text not null default '',
   printed_at timestamptz,
   printed_by text not null default '',
   created_by uuid default auth.uid() references auth.users(id),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- 手渡しはお客様のサイン、発送は伝票・郵便物の写真のどちらかが必ずある
+  constraint deposit_returns_proof check (signature <> '' or cardinality(photos) > 0)
 );
 create index deposit_returns_deposit_idx on public.deposit_returns(deposit_id);
 
@@ -211,6 +218,17 @@ create policy returns_update on public.deposit_returns for update to authenticat
   using (public.is_staff()) with check (public.is_staff());
 
 create policy audit_select on public.audit_log for select to authenticated using (public.is_admin());
+
+-- ---------------------------------------------------------------------
+-- 写真の保存先（非公開）。職員は見ることと追加だけでき、上書き・削除は誰もできない
+-- ---------------------------------------------------------------------
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('deposit-photos', 'deposit-photos', false, 10485760, array['image/jpeg']);
+
+create policy deposit_photos_select on storage.objects for select to authenticated
+  using (bucket_id = 'deposit-photos' and public.is_staff());
+create policy deposit_photos_insert on storage.objects for insert to authenticated
+  with check (bucket_id = 'deposit-photos' and public.is_staff());
 
 -- 内部用の関数は外から呼べないようにする
 revoke execute on function public.handle_new_user() from public, anon, authenticated;

@@ -1,6 +1,7 @@
 import { useState, type RefObject } from 'react';
 import { useAuth } from './auth';
 import { elementToPdf, savePdf, sendPdfMail, type PaperSize } from './pdf';
+import { waitForImages } from './photos';
 import PrintedPrompt from './PrintedPrompt';
 
 // 用紙の印刷（PC）・PDF保存・メール送信の操作バー。
@@ -33,6 +34,7 @@ export default function PdfActions({
     setMsg('');
     setError('');
     try {
+      await waitForImages(paperRef.current);
       const pdf = await elementToPdf(paperRef.current, size);
       if (kind === 'mail') {
         await sendPdfMail({ to: to.trim(), subject, text, filename, pdf });
@@ -47,7 +49,8 @@ export default function PdfActions({
     }
   };
 
-  const print = () => {
+  const print = async () => {
+    if (paperRef.current) await waitForImages(paperRef.current);
     window.print();
     if (onPrinted) setAskPrinted(true);
   };

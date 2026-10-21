@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { DatePickField } from '../inputs';
-import { getDeposit, updateDepositNotes, statusOf, STATUS_LABEL, returnedIdx, daysSince, fmtDateTime, fmtDate, type Deposit } from '../db';
+import PhotoThumbs from '../PhotoThumbs';
+import { getDeposit, updateDepositNotes, statusOf, STATUS_LABEL, returnedIdx, returnMethodText, daysSince, fmtDateTime, fmtDate, type Deposit } from '../db';
 
 export default function DetailPage() {
   const { id } = useParams();
@@ -85,6 +86,14 @@ export default function DetailPage() {
           <dd>{d.staff_name}</dd>
           <dt>用途</dt>
           <dd>{d.purpose || '—'}</dd>
+          {d.photos.length > 0 && (
+            <>
+              <dt>写真</dt>
+              <dd>
+                <PhotoThumbs paths={d.photos} />
+              </dd>
+            </>
+          )}
           <dt>お客様サイン</dt>
           <dd>
             <img className="sig-img" src={d.signature} alt="預かり時サイン" />
@@ -150,7 +159,9 @@ export default function DetailPage() {
               <dd>{fmtDateTime(r.returned_at)}</dd>
               <dt>返却資料</dt>
               <dd>{r.item_idx.map((i) => d.items[i]?.name).join('、')}</dd>
-              <dt>受領者</dt>
+              <dt>返却方法</dt>
+              <dd>{returnMethodText(r)}</dd>
+              <dt>{r.method === 'hand' ? '受領者' : '送り先'}</dt>
               <dd>{r.recipient || '—'}</dd>
               <dt>返却担当</dt>
               <dd>{r.staff_name}</dd>
@@ -160,10 +171,21 @@ export default function DetailPage() {
                   <dd>{r.memo}</dd>
                 </>
               )}
-              <dt>受領サイン</dt>
-              <dd>
-                <img className="sig-img" src={r.signature} alt="返却時サイン" />
-              </dd>
+              {r.method === 'hand' ? (
+                <>
+                  <dt>受領サイン</dt>
+                  <dd>
+                    <img className="sig-img" src={r.signature} alt="返却時サイン" />
+                  </dd>
+                </>
+              ) : (
+                <>
+                  <dt>発送記録</dt>
+                  <dd>
+                    <PhotoThumbs paths={r.photos} />
+                  </dd>
+                </>
+              )}
             </dl>
             <div className="row" style={{ marginTop: 8 }}>
               {r.hash && <div className="hash">照合コード：{r.hash.slice(0, 16)}</div>}

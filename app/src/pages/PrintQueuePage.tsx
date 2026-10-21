@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../auth';
 import PrintedPrompt from '../PrintedPrompt';
+import { waitForImages } from '../photos';
 import { LabelPaper, ReturnPaper } from '../papers';
 import { getDeposit, listDeposits, markPrinted, queueItems, fmtDateTime, type Deposit, type QueueItem } from '../db';
 
@@ -18,6 +19,7 @@ export default function PrintQueuePage({ onChanged }: { onChanged: () => void })
   const [printKeys, setPrintKeys] = useState<QueueItem[]>([]);
   const [askPrinted, setAskPrinted] = useState(false);
   const [error, setError] = useState('');
+  const printAreaRef = useRef<HTMLDivElement>(null);
 
   const load = async () => {
     try {
@@ -66,7 +68,7 @@ export default function PrintQueuePage({ onChanged }: { onChanged: () => void })
       const full = await Promise.all(ids.map((id) => getDeposit(id)));
       setPrintKeys(chosen);
       setPrinting(full);
-      await new Promise((r) => setTimeout(r, 700)); // QRコード・サイン画像の描画を待つ
+      await waitForImages(printAreaRef.current!); // QRコード・写真の読み込みを待つ
       window.print();
       setAskPrinted(true);
     } catch (e) {
@@ -167,7 +169,7 @@ export default function PrintQueuePage({ onChanged }: { onChanged: () => void })
       </div>
 
       {/* 印刷用（画面には表示しない） */}
-      <div className="print-area">
+      <div className="print-area" ref={printAreaRef}>
         {printKeys.map((x) => {
           const d = fullById.get(x.deposit.id);
           if (!d) return null;

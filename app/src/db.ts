@@ -10,15 +10,27 @@ export interface DocItem {
   qty: string;
 }
 
+export type ReturnMethod = 'hand' | 'courier' | 'post';
+
+export const METHOD_LABEL: Record<ReturnMethod, string> = {
+  hand: '手渡し',
+  courier: '宅配便',
+  post: '郵便',
+};
+
 export interface ReturnEvent {
   id: string;
   deposit_id: string;
   returned_at: string;
   staff_name: string; // 返却した事務所側担当者
-  recipient: string; // 受け取ったクライアント側の氏名
+  recipient: string; // 受け取ったクライアント側の氏名（発送のときは送り先）
   item_idx: number[]; // 返却した資料の index
   memo: string;
-  signature: string; // dataURL (PNG)
+  method: ReturnMethod;
+  carrier: string; // ヤマト運輸・簡易書留など（発送のとき）
+  tracking_no: string;
+  signature: string; // 手渡しのときの受領サイン dataURL (PNG)。発送のときは ''
+  photos: string[]; // 発送のときの伝票・郵便物の写真（Storage のパス）
   hash: string;
   printed_at: string | null; // 返却確認書を印刷した日時
   printed_by: string;
@@ -37,6 +49,7 @@ export interface Deposit {
   expected_return: string | null;
   memo: string;
   signature: string; // 預かり時の顧客サイン
+  photos: string[]; // 預かり時に撮った資料の写真（Storage のパス）
   hash: string;
   label_printed_at: string | null; // 貼付ラベルを印刷した日時
   label_printed_by: string;
@@ -68,7 +81,7 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 const LIST_COLUMNS =
-  'id,no,client_name,handed_by,items,purpose,received_at,staff_name,location,expected_return,memo,hash,label_printed_at,label_printed_by,created_at,updated_at,deposit_returns(id,deposit_id,returned_at,staff_name,recipient,item_idx,memo,hash,printed_at,printed_by)';
+  'id,no,client_name,handed_by,items,purpose,received_at,staff_name,location,expected_return,memo,photos,hash,label_printed_at,label_printed_by,created_at,updated_at,deposit_returns(id,deposit_id,returned_at,staff_name,recipient,item_idx,memo,method,carrier,tracking_no,photos,hash,printed_at,printed_by)';
 
 function check<T>(res: { data: T | null; error: { message: string } | null }): T {
   if (res.error) throw new Error(res.error.message);
@@ -89,7 +102,8 @@ export async function getDeposit(id: string): Promise<Deposit> {
   return d;
 }
 
-export type NewDeposit = Omit<Deposit, 'id' | 'no' | 'hash' | 'label_printed_at' | 'label_printed_by' | 'created_at' | 'updated_at' | 'deposit_returns'>;
+// id は写真を先に送信できるよう、画面側で crypto.randomUUID() で作って渡す
+export type NewDeposit = Omit<Deposit, 'no' | 'hash' | 'label_printed_at' | 'label_printed_by' | 'created_at' | 'updated_at' | 'deposit_returns'>;
 
 export async function createDeposit(input: NewDeposit): Promise<string> {
   const hash = await sha256(receiveHashSource(input));
@@ -188,17 +202,38 @@ export function queueItems(rows: Deposit[], onlyStaff = ''): QueueItem[] {
   return q;
 }
 
+// 「宅配便（ヤマト運輸）　追跡番号 1234」のような返却方法の説明
+export function returnMethodText(r: Pick<ReturnEvent, 'method' | 'carrier' | 'tracking_no'>): string {
+  let s = METHOD_LABEL[r.method] ?? METHOD_LABEL.hand;
+  if (r.carrier) s += `（${r.carrier}）`;
+  if (r.tracking_no) s += `　追跡番号 ${r.tracking_no}`;
+  return s;
+}
+
+// UUID v4。crypto.randomUUID は https でしか使えないため getRandomValues で作る
+export function newId(): string {
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
 export function daysSince(iso: string): number {
   return Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+}
+
+export async function sha256Bytes(data: BufferSource): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 // 署名時点の内容から SHA-256 を計算し、印刷物とデータの照合に使う（crypto.subtle は https / localhost のみ）
 export async function sha256(value: unknown): Promise<string> {
   if (!crypto.subtle) return '';
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(value)));
-  return Array.from(new Uint8Array(buf))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
+  return sha256Bytes(new TextEncoder().encode(JSON.stringify(value)));
 }
 
 export function receiveHashSource(d: NewDeposit) {
@@ -210,6 +245,8 @@ export function receiveHashSource(d: NewDeposit) {
     received_at: d.received_at,
     staff_name: d.staff_name,
     signature: d.signature,
+    // 写真のパスは中身のハッシュを含むので、写真の差し替えも検出できる。写真のない記録は以前と同じ内容のまま
+    ...(d.photos.length ? { photos: d.photos } : {}),
   };
 }
 
@@ -221,6 +258,7 @@ export function returnHashSource(d: Pick<Deposit, 'id' | 'items'>, r: NewReturn)
     recipient: r.recipient,
     items: r.item_idx.map((i) => d.items[i]),
     signature: r.signature,
+    ...(r.method !== 'hand' ? { method: r.method, carrier: r.carrier, tracking_no: r.tracking_no, photos: r.photos } : {}),
   };
 }
 

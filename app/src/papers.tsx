@@ -1,7 +1,8 @@
 import { useEffect, useState, type Ref } from 'react';
 import QRCode from 'qrcode';
 import { PAPER_MM, type PaperSize } from './pdf';
-import { returnedIdx, fmtDate, fmtDateTime, type Deposit, type ReturnEvent } from './db';
+import { usePhotoUrls } from './photos';
+import { returnedIdx, returnMethodText, fmtDate, fmtDateTime, METHOD_LABEL, type Deposit, type ReturnEvent } from './db';
 
 // 貼付ラベル・預り証・返却確認書の用紙レイアウト。画面表示・PDF化・印刷で共通に使う。
 
@@ -19,6 +20,35 @@ function useQr(d: Deposit) {
     QRCode.toDataURL(`${location.origin}${location.pathname}#/d/${d.id}`, { margin: 0, width: 400 }).then(setQr);
   }, [d.id]);
   return qr;
+}
+
+// 用紙に載せる写真。読み込み中は data-loading の枠を出し、PDF化・印刷はそれが消えるまで待つ
+function PaperPhotos({ paths, height }: { paths: string[]; height: string }) {
+  const urls = usePhotoUrls(paths);
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2mm' }}>
+      {urls.map((url, i) =>
+        url ? (
+          <img key={i} src={url} alt="" style={{ height, maxWidth: '100%', objectFit: 'contain', border: '1px solid #bbb' }} />
+        ) : url === false ? (
+          <span key={i} style={{ fontSize: '8.5pt' }}>（写真を読み込めませんでした）</span>
+        ) : (
+          <span key={i} data-loading style={{ display: 'inline-block', height, width: height, background: '#f2f2f2' }} />
+        ),
+      )}
+    </div>
+  );
+}
+
+// 返却状況の表で、受領サインの代わりに発送の記録を出す
+function ReturnProof({ r, height }: { r: ReturnEvent; height: string }) {
+  if (r.method === 'hand') return <img src={r.signature} alt="" style={{ height, maxWidth: '100%', objectFit: 'contain' }} />;
+  return (
+    <>
+      <div style={{ fontSize: '8.5pt', marginBottom: '1mm' }}>{returnMethodText(r)}</div>
+      <PaperPhotos paths={r.photos} height={height} />
+    </>
+  );
 }
 
 export function LabelPaper({ d, size, officeName, ref }: { d: Deposit; size: PaperSize; officeName: string; ref?: Ref<HTMLDivElement> }) {
@@ -55,7 +85,7 @@ export function LabelPaper({ d, size, officeName, ref }: { d: Deposit; size: Pap
             <div style={{ fontSize: '2.4em', fontWeight: 800, lineHeight: 1.1 }}>{d.no}</div>
             <div style={{ fontSize: '2em', fontWeight: 800, lineHeight: 1.25, marginTop: '0.35em', wordBreak: 'break-all' }}>{d.client_name} 様</div>
           </div>
-          {qr && <img src={qr} alt="" style={{ width: '6em', height: '6em', flex: 'none' }} />}
+          {qr ? <img src={qr} alt="" style={{ width: '6em', height: '6em', flex: 'none' }} /> : <span data-loading style={{ width: '6em', height: '6em', flex: 'none' }} />}
         </div>
         {/* 担当者と返却予定は、棚で見てすぐ分かるよう番号・顧客名と同じ大きさにする */}
         <div style={{ display: 'flex', gap: '0.6em', marginTop: '0.7em' }}>
@@ -164,6 +194,14 @@ export function ReceiptPaper({ d, officeName, ref }: { d: Deposit; officeName: s
               <img src={d.signature} alt="" style={{ height: '20mm', maxWidth: '100%', objectFit: 'contain' }} />
             </td>
           </tr>
+          {d.photos.length > 0 && (
+            <tr>
+              <th style={head}>預かり時の写真</th>
+              <td style={cell} colSpan={3}>
+                <PaperPhotos paths={d.photos} height="32mm" />
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
 
@@ -177,7 +215,7 @@ export function ReceiptPaper({ d, officeName, ref }: { d: Deposit; officeName: s
               <th style={{ ...head, width: '28mm' }}>返却日時</th>
               <th style={head}>返却資料</th>
               <th style={{ ...head, width: '28mm' }}>受領者 / 担当</th>
-              <th style={{ ...head, width: '36mm' }}>受領サイン</th>
+              <th style={{ ...head, width: '36mm' }}>受領サイン／発送</th>
             </tr>
           </thead>
           <tbody>
@@ -193,7 +231,7 @@ export function ReceiptPaper({ d, officeName, ref }: { d: Deposit; officeName: s
                   <div style={{ fontSize: '8.5pt' }}>担当：{r.staff_name}</div>
                 </td>
                 <td style={cell}>
-                  <img src={r.signature} alt="" style={{ height: '15mm', maxWidth: '100%', objectFit: 'contain' }} />
+                  <ReturnProof r={r} height="15mm" />
                 </td>
               </tr>
             ))}
@@ -213,10 +251,11 @@ export function ReceiptPaper({ d, officeName, ref }: { d: Deposit; officeName: s
   );
 }
 
-// 1回分の返却について、お客様の受領サイン入りの「資料返却確認書」
+// 1回分の返却について、お客様の受領サイン（発送のときは伝票・郵便物の写真）入りの「資料返却確認書」
 export function ReturnPaper({ d, r, officeName, ref }: { d: Deposit; r: ReturnEvent; officeName: string; ref?: Ref<HTMLDivElement> }) {
   const done = returnedIdx(d);
   const remaining = d.items.filter((_, i) => !done.has(i));
+  const shipped = r.method !== 'hand';
   return (
     <div ref={ref} className="paper paper-b5" style={{ ...paperStyle('b5'), padding: '12mm 13mm', fontSize: '10pt' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '8.5pt' }}>
@@ -231,7 +270,11 @@ export function ReturnPaper({ d, r, officeName, ref }: { d: Deposit; r: ReturnEv
           <div>返却担当：{r.staff_name}</div>
         </div>
       </div>
-      <p>お預かりしていた下記の資料を返却し、お客様に受領いただいたことを確認しました。</p>
+      <p>
+        {shipped
+          ? `お預かりしていた下記の資料を、${METHOD_LABEL[r.method]}にて返送しました。`
+          : 'お預かりしていた下記の資料を返却し、お客様に受領いただいたことを確認しました。'}
+      </p>
 
       <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '4mm' }}>
         <thead>
@@ -261,7 +304,7 @@ export function ReturnPaper({ d, r, officeName, ref }: { d: Deposit; r: ReturnEv
             <td style={cell}>{fmtDateTime(d.received_at)}</td>
           </tr>
           <tr>
-            <th style={head}>受領者</th>
+            <th style={head}>{shipped ? '送り先' : '受領者'}</th>
             <td style={cell}>{r.recipient}</td>
             <th style={head}>預かり担当</th>
             <td style={cell}>{d.staff_name}</td>
@@ -274,12 +317,29 @@ export function ReturnPaper({ d, r, officeName, ref }: { d: Deposit; r: ReturnEv
               </td>
             </tr>
           )}
-          <tr>
-            <th style={head}>受領サイン</th>
-            <td style={cell} colSpan={3}>
-              <img src={r.signature} alt="" style={{ height: '22mm', maxWidth: '100%', objectFit: 'contain' }} />
-            </td>
-          </tr>
+          {shipped ? (
+            <>
+              <tr>
+                <th style={head}>返却方法</th>
+                <td style={cell} colSpan={3}>
+                  {returnMethodText(r)}
+                </td>
+              </tr>
+              <tr>
+                <th style={head}>発送記録の写真</th>
+                <td style={cell} colSpan={3}>
+                  <PaperPhotos paths={r.photos} height={r.photos.length > 2 ? '34mm' : '55mm'} />
+                </td>
+              </tr>
+            </>
+          ) : (
+            <tr>
+              <th style={head}>受領サイン</th>
+              <td style={cell} colSpan={3}>
+                <img src={r.signature} alt="" style={{ height: '22mm', maxWidth: '100%', objectFit: 'contain' }} />
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
 
